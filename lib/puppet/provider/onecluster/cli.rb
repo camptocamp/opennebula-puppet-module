@@ -11,9 +11,11 @@
 # Deutsche Post E-POST Development GmbH - 2014
 #
 
+require 'puppet/provider/one'
 require 'rexml/document'
 
-Puppet::Type.type(:onecluster).provide(:cli) do
+Puppet::Type.type(:onecluster).provide(:cli, :parent => Puppet::Provider::One) do
+
   desc "onecluster provider"
 
   has_command(:onecluster, "onecluster") do
@@ -73,18 +75,30 @@ Puppet::Type.type(:onecluster).provide(:cli) do
 
 
   def self.instances
-    REXML::Document.new(onecluster('list', '-x')).elements.collect("CLUSTER_POOL/CLUSTER") do |cluster|
-      datastores = cluster.elements.collect("DATASTORES/ID") do |id|
-        REXML::Document.new(onedatastore('show', id.text, '-x')).elements["DATASTORE/NAME"].text
-      end
-      hosts = cluster.elements.collect("HOSTS/ID") do |id|
-        REXML::Document.new(onehost('show', id.text, '-x')).elements["HOST/NAME"].text
-      end
-      vnets = cluster.elements.collect("VNETS/ID") do |id|
-        REXML::Document.new(onevnet('show', id.text, '-x')).elements["VNET/NAME"].text
-      end
+    resource = OpenNebula::ClusterPool.new(self.client)
+    rc = resource.info
+    throw Puppet::Error rc.message if OpenNebula.is_error?(rc)
+    resource.get_hash['CLUSTER_POOL'].collect do |k, v|
+      datastores = v['DATASTORES']['ID'].map do |id|
+        resource = OpenNebula::Datastore.new_with_id(id, self.client)
+        rc = resource.info
+        throw Puppet::Error rc.message if OpenNebula.is_error?(rc)
+        resource.to_hash['DATASTORE']['NAME']
+      end if v['DATASTORES'] and v['DATASTORES']['ID']
+      hosts = v['HOSTS']['ID'].map do |id|
+        resource = OpenNebula::Host.new_with_id(id, self.client)
+        rc = resource.info
+        throw Puppet::Error rc.message if OpenNebula.is_error?(rc)
+        resource.to_hash['HOST']['NAME']
+      end if v['HOSTS'] and v['HOSTS']['ID']
+      vnets = v['VNETS']['ID'].map do |id|
+        resource = OpenNebula::VirtualNetwork.new_with_id(id, self.client)
+        rc = resource.info
+        throw Puppet::Error rc.message if OpenNebula.is_error?(rc)
+        resource.to_hash['VNET']['NAME']
+      end if v['VNETS'] and v['VNETS']['ID']
       new(
-        :name       => cluster.elements["NAME"].text,
+        :name       => v['NAME'],
         :ensure     => :present,
         :datastores => datastores,
         :hosts      => hosts,
